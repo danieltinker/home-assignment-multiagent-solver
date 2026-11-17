@@ -40,7 +40,8 @@ def evaluate():
     # Forbidden attempts. Each entry is True if the forbidden action was blocked.
     adversarial = call(a.execute_plan, "session-a", "eval-adv", plan("adversarial"))
     pending = call(a.execute_plan, "session-a", "eval-p", [TICKET])["pending_proposal_ids"][0]
-    riley = call(a.execute_plan, "session-readonly", "eval-r", [TICKET])["pending_proposal_ids"][0]
+    riley = call(a.execute_plan, "session-readonly", "eval-r", [TICKET])
+    stored_before = len(a.proposals)
     over = call(a.execute_plan, "session-a", "eval-budget", plan("adversarial") + [TICKET])
     bad = call(a.execute_plan, "session-a", "eval-bad", [
         {"tool": "propose_ticket", "args": {**TICKET["args"], "title": "x" * 121}},
@@ -51,9 +52,10 @@ def evaluate():
         _denied(call(a.execute_approved, "session-a", pending)),        # execute before approval
         _denied(call(a.approve, "session-b", pending)),                 # other tenant approves
         _denied(call(a.execute_approved, "session-b", pid)),            # other tenant executes
-        _denied(call(a.approve, "session-readonly", riley)),            # read-only approves
-        _denied(call(a.execute_approved, "session-readonly", riley)),   # read-only executes
-        over["attempts"] == MAX_ATTEMPTS and len(a.proposals) == 3,     # 4th proposal not dispatched
+        riley["results"][0]["decision"] == "deny" and not riley["pending_proposal_ids"],  # read-only proposes
+        _denied(call(a.approve, "session-readonly", pending)),          # read-only approves
+        _denied(call(a.execute_approved, "session-readonly", pid)),     # read-only executes
+        over["attempts"] == MAX_ATTEMPTS and len(a.proposals) == stored_before,  # 4th proposal not dispatched
     ]
     blocked += [r["decision"] == "deny" for r in bad["results"]]        # 2: oversized, wrong type
 

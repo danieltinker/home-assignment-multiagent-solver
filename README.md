@@ -29,7 +29,7 @@ one rejected cross-tenant plan, and the evaluation counts.
 | `planner.py` | Deterministic fake planner. Its output is untrusted |
 | `fixtures.json` | Synthetic sessions, alerts, assets |
 | `demo.py` | Demo and evaluation report |
-| `test_guard.py` | The 12 required tests plus 5 extras |
+| `test_guard.py` | The 12 required tests plus 6 extras |
 
 ## Trust boundary
 
@@ -76,8 +76,9 @@ Authority comes from one place: the session-to-principal lookup. Nothing in a pr
   `tickets_created` is always 0 there. Only `execute_approved` reports `executed`.
 - **Trace holds categories, not content.** Run ID, principal, tenant, step, tool, allow/deny, category,
   duration. An unknown tool name is logged as `unknown` because the model chose that text.
-- **A read-only user may propose.** A pending proposal has no effect, and that user cannot approve or
-  execute it.
+- **A read-only user cannot propose.** `propose_ticket` is denied with `permission_denied` when the
+  principal lacks `can_create_ticket`. Otherwise the call would report `awaiting_approval` for a
+  proposal nobody could ever approve. (Changed after review finding G1.)
 - **Random proposal and ticket IDs.** They avoid leaking counts across tenants. Access control does not
   depend on them being secret.
 
@@ -87,15 +88,15 @@ Output of `python3 demo.py` on this suite:
 
 ```
 Allowed-task completion:   3/3
-Forbidden execution:       0/11 (target 0)
+Forbidden execution:       0/12 (target 0)
 Unauthorized disclosure:   0 of 17 outputs contain the beta canary (target 0)
 Replay correctness:        PASS (same ticket ID, 1 ticket, 1 audit record)
 Budget enforcement:        PASS (max 3 attempts per call)
 ```
 
-The 11 forbidden attempts: cross-tenant read, unknown tool, forged tenant argument, execute before
-approval, other tenant approves, other tenant executes, read-only approves, read-only executes,
-a fourth proposal, oversized title, wrong argument type.
+The 12 forbidden attempts: cross-tenant read, unknown tool, forged tenant argument, execute before
+approval, other tenant approves, other tenant executes, read-only proposes, read-only approves,
+read-only executes, a fourth proposal, oversized title, wrong argument type.
 
 These are counts over a small fixed synthetic suite. They show the demonstrated cases hold. They are
 not a security guarantee, and they are not precision or recall: nothing here classifies anything.
@@ -126,4 +127,6 @@ audit retention.
 
 Written with Claude Code (Anthropic) as the implementing assistant, from the practice brief, directed
 by Daniel Baruch. The code and tests were AI-drafted. The tests and demo were run locally and the
-results above are from that run. No independent review had been received when this was committed.
+results above are from that run. A second AI assistant (Grok) reviewed commit `ccb5dae` read-only and
+reported three findings, relayed by Daniel; all three are fixed here and listed in `WORKLOG.md`.
+The reviewer had not re-verified this revision when it was committed.

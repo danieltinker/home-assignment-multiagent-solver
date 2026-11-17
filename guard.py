@@ -7,6 +7,7 @@ Trust model
 - approve() and execute_approved() are human-interface calls. They are deliberately absent
   from the model-callable tool table, so no proposal can reach them.
 """
+import copy
 import json
 import time
 import uuid
@@ -55,7 +56,8 @@ class Assistant:
     # concurrent execute_approved calls could double-create. Upgrade path: a transactional
     # store with a unique constraint on ticket.proposal_id.
     def __init__(self, fixtures=None):
-        fx = fixtures if fixtures is not None else json.loads(FIXTURES.read_text())
+        # Deep copy: the caller keeping a reference must not be able to edit principals later.
+        fx = copy.deepcopy(fixtures) if fixtures is not None else json.loads(FIXTURES.read_text())
         self.sessions = fx["sessions"]
         self.alerts = {a["id"]: a for a in fx["alerts"]}
         self.assets = {a["id"]: a for a in fx["assets"]}
@@ -91,6 +93,10 @@ class Assistant:
         return "ok", dict(self._owned(self.assets, args["asset_id"], principal))
 
     def _propose_ticket(self, principal, run_id, args):
+        # A principal who could never approve gets no proposal, so "awaiting_approval"
+        # is only ever reported for something that can actually be approved.
+        if principal.get("can_create_ticket") is not True:
+            raise Denied("permission_denied")
         self._owned(self.alerts, args["alert_id"], principal)
         proposal_id = "P-" + uuid.uuid4().hex[:12]
         self.proposals[proposal_id] = {

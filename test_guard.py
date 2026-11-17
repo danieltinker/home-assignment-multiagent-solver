@@ -7,7 +7,7 @@ import json
 import unittest
 
 import demo
-from guard import MAX_ATTEMPTS, NOT_FOUND, Assistant
+from guard import FIXTURES, MAX_ATTEMPTS, NOT_FOUND, Assistant
 from planner import plan
 
 CANARY = "SYNTHETIC-BETA-ONLY-CANARY"
@@ -107,11 +107,19 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(self.a.tickets, {})
 
     def test_08_readonly_principal_cannot_approve_or_execute(self):
-        own = self.propose("session-readonly")
-        self.assert_denied(self.a.approve("session-readonly", own), "permission_denied")
-        self.assert_denied(self.a.execute_approved("session-readonly", own), "permission_denied")
-        # Same tenant, different user: alice's approved proposal is not riley's to run.
+        # Review finding G1: riley cannot even propose, so nothing is ever reported as
+        # awaiting an approval that no one could give.
+        out = self.a.execute_plan("session-readonly", "run-8", [{"tool": "propose_ticket", "args": dict(TICKET_ARGS)}])
+        self.assertEqual((out["results"][0]["decision"], out["results"][0]["category"]), ("deny", "permission_denied"))
+        self.assertEqual(out["status"], "finished_nothing_pending")
+        self.assertEqual(out["pending_proposal_ids"], [])
+        self.assertEqual(self.a.proposals, {})
+        # Reads still work for riley.
+        read = self.a.execute_plan("session-readonly", "run-8", [{"tool": "get_alert", "args": {"alert_id": "A-1"}}])
+        self.assertEqual(read["results"][0]["decision"], "allow")
+        # Same tenant, different user: alice's proposal is not riley's to approve or run.
         alices = self.propose("session-a")
+        self.assert_denied(self.a.approve("session-readonly", alices), NOT_FOUND)
         self.a.approve("session-a", alices)
         self.assert_denied(self.a.execute_approved("session-readonly", alices), NOT_FOUND)
         self.assertEqual(self.a.tickets, {})
@@ -190,12 +198,22 @@ class GuardTests(unittest.TestCase):
 
     # --- beyond the required twelve --------------------------------------
 
-    def test_permission_is_rechecked_at_execution(self):
-        pid = self.propose()
+    def test_permission_is_rechecked_at_approval_and_execution(self):
+        pid, later = self.propose(), self.propose()
         self.a.approve("session-a", pid)
-        self.a.sessions["session-a"]["can_create_ticket"] = False  # revoked after approval
+        self.a.sessions["session-a"]["can_create_ticket"] = False  # revoked after proposing/approving
+        self.assert_denied(self.a.approve("session-a", later), "permission_denied")
         self.assert_denied(self.a.execute_approved("session-a", pid), "permission_denied")
         self.assertEqual(self.a.tickets, {})
+
+    def test_caller_cannot_edit_principals_through_passed_fixtures(self):
+        # Review finding G3.
+        fx = json.loads(FIXTURES.read_text())
+        a = Assistant(fx)
+        fx["sessions"]["session-a"]["tenant_id"] = "beta"
+        out = a.execute_plan("session-a", "run-g3", [{"tool": "get_alert", "args": {"alert_id": "B-1"}}])
+        self.assertEqual(out["results"][0]["category"], NOT_FOUND)
+        self.assertEqual(out["trace"][0]["tenant_id"], "acme")
 
     def test_execution_ignores_later_model_arguments(self):
         # execute_approved accepts no payload; a second proposal cannot rewrite the first.
